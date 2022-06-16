@@ -1,6 +1,6 @@
-use <gears.scad>
-use <gear_grub.scad>
-use <nemapedastal.scad>
+use <helpers/gears.scad>
+use <helpers/gear_grub.scad>
+use <helpers/nemapedastal.scad>
 
 
  //  % everything_old();
@@ -140,7 +140,7 @@ module hinge_base() {
         hull() {
               translate([0, -25, aperture_height + acrylic_thickness * 2 + door_frame_thickness * 1 + 10]) cube([door_hinge_hinge_thickness, 50, 45]);
             translate(pos1_vec)
-            rotate(90, [0, 1, 0]) cylinder(r = door_hinge_rod_radius * 2, h = door_hinge_hinge_thickness);
+            rotate(90, [0, 1, 0]) cylinder(r = 5, h = door_hinge_hinge_thickness);
             
             translate(pos2_vec)
             rotate(90, [0, 1, 0]) cylinder(r = door_hinge_rod_radius * 2, h = door_hinge_hinge_thickness);
@@ -200,11 +200,12 @@ mirror([1,0,0]) doorframe();
 top_piece();
 motor_mount();
     difference(){
-    translate([-60,0,0])gear_side();
-  translate([-60,-50,75])      cube([100,100,100]);
+    translate([-90,0,0])gear_side();
+  translate([-60,-50,85])      cube([100,100,100]);
          
     }
-    translate([-50,0,67])      cube([50,25,5]);
+#    translate([-80,0,67])      cube([80,25,5]);
+    #    translate([-80,-20,120])      cube([80,25,5]);
 translate([-grub_length,0,0])gear_side();
 translate([cog_sep*3+cog_width*2+door_hinge_hinge_thickness,0,0])gear_side();
 
@@ -223,8 +224,8 @@ translate([15,-17,29])
     cube([10,5,40]);
 translate([-35,-17,29]) 
     cube([10,5,40]);
-translate([-35,-17,29]) 
-    cube([60,5,10]);
+translate([-35,-20,29]) 
+  #  cube([60,8,10]);
 
 
 door_at_angle(0);
@@ -256,23 +257,34 @@ module wholebox(){
     }
 
 
-//wholebox();
-
-//frame_piece();
 
 
+modules = [5];
 
-//door_complete();
+for(m = modules) {
+    select(m) {
+       
+
+frame_piece();
+
+door_complete();
 
 
 
 
-//color("blue") translate([10+cog_sep+door_hinge_hinge_thickness,0,0]) top_cog();
-//translate([cog_sep+door_hinge_hinge_thickness,0,0])motor_cog();
+color("blue") translate([10+cog_sep+door_hinge_hinge_thickness,0,0]) top_cog();
+translate([cog_sep+door_hinge_hinge_thickness,0,0])motor_cog();
 
 translate([10+cog_sep+door_hinge_hinge_thickness,0,0])color("red") mid_cog();
 
 
+
+    }
+}
+
+module select(m) {
+    children(m);
+}  
 
 
 
