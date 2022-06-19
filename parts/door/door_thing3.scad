@@ -193,14 +193,19 @@ module top_piece(){
 }
    
 
+
+
+
 module frame_piece(){
-doorframe();
-mirror([1,0,0]) doorframe();
+    
+
+doorframe_with_plate();
+mirror([1,0,0]) doorframe_with_plate();
 
 top_piece();
 motor_mount();
     difference(){
-    translate([-90,0,0])gear_side();
+    translate([-89,0,0])gear_side();
   translate([-60,-50,85])      cube([100,100,100]);
          
     }
@@ -258,8 +263,45 @@ module wholebox(){
 
 
 
+centers_hole_spacing_for_frame=170;
+    extra = 10;
+    
+plate_thickness=5;
+    
+    plate_z_offset = 30;
+    plate_height=120;
+    bolt_offset = -18;
 
-modules = [5];
+module doorframe_with_plate(){
+    doorframe();
+    difference(){
+        translate([0,door_frame_depth-plate_thickness,-plate_z_offset])
+    cube([centers_hole_spacing_for_frame/2+extra,plate_thickness,plate_height]);
+    #translate([0, 0, -door_frame_thickness])
+        cube([aperture_width / 2 + acrylic_thickness + door_frame_thickness, door_frame_depth+20, aperture_height + acrylic_thickness * 2 + door_frame_thickness * 2]);
+        
+        
+        translate([centers_hole_spacing_for_frame/2,0,bolt_offset
+        ]) # rotate([-90,0,0])cylinder(r=2.5,h=100);
+        
+       translate([centers_hole_spacing_for_frame/2,0,bolt_offset+50
+        ]) # rotate([-90,0,0])cylinder(r=2.5,h=100);
+        
+        translate([centers_hole_spacing_for_frame/2,0,bolt_offset+100
+        ]) # rotate([-90,0,0])cylinder(r=2.5,h=100);
+    
+    
+    translate([centers_hole_spacing_for_frame/2,15,bolt_offset+100
+        ]) # rotate([-90,0,0])cylinder(r=6,h=10);
+    }
+    
+  
+}
+
+
+    
+
+modules = [0];
 
 for(m = modules) {
     select(m) {
