@@ -199,7 +199,12 @@ module top_piece(){
 module frame_piece(){
     
 
-doorframe_with_plate();
+difference(){doorframe_with_plate();
+       translate([70,0,50
+        ]) # rotate([-90,0,0])cylinder(r=3.5,h=100);
+        
+}
+    
 mirror([1,0,0]) doorframe_with_plate();
 
 top_piece();
