@@ -1,0 +1,637 @@
+#include <MultiStepper.h>
+#include <AccelStepper.h>
+#include <PID_v1.h>
+#include <thermistor.h>
+#define KP 150
+#define KI 0.5
+#define KD 20
+#define heat_truncation_factor 1.5
+#define X_STARTING_HEIGHT 200
+
+#define X_STEP_PIN         54
+#define X_DIR_PIN          55
+#define X_ENABLE_PIN       38
+#define X_ENDSTOP_PIN 3
+
+#define Y_STEP_PIN         60
+#define Y_DIR_PIN          61
+#define Y_ENABLE_PIN       56
+#define Y_ENDSTOP_PIN          14
+
+#define Z_STEP_PIN         46
+#define Z_DIR_PIN          48
+#define Z_ENABLE_PIN       62
+#define Z_ENDSTOP_PIN          18
+
+#define IN_POS       100
+#define OUT_POS       2480
+#define UP_DOWN_DIFF       800
+
+#define SHAKER_OPTIMAL 0
+#define SHAKER_SPEED 8000
+
+#define HEATER_PIN 8
+#define FAN_PIN 9
+#define GAS_PIN 10
+
+#define GUARANTEED_TO_CLOSE -18100
+#define GUARANTEED_TO_OPEN 18000
+
+
+#define BAUD (57600) // How fast is the Arduino talking?
+#define MAX_BUF (64) // What is the longest message Arduino can store?
+
+AccelStepper stepperX(AccelStepper::DRIVER, X_STEP_PIN, X_DIR_PIN);
+AccelStepper stepperY(AccelStepper::DRIVER, Y_STEP_PIN, Y_DIR_PIN);
+AccelStepper stepperDoor(AccelStepper::DRIVER, Z_STEP_PIN, Z_DIR_PIN);
+
+thermistor therm1(13,0);
+double setPoint, outputVal;
+
+long times_gassed = 0;
+
+
+bool is_open = false;
+long lowest_pos=650;
+long spacing = 2000;
+long lower_positions[] = {lowest_pos,lowest_pos+1*spacing,lowest_pos+2*spacing,lowest_pos+3*spacing,lowest_pos+4*spacing,lowest_pos+5*spacing-100,lowest_pos+6*spacing-100,lowest_pos+7*spacing-100};
+
+char buf[80];
+
+const byte numChars = 41;
+char receivedChars[numChars];
+char tempChars[numChars];     // temporary array for use when parsing
+      
+float oxygen = 0.0;  // variables to hold the parsed data
+double temperature = 0.0;
+PID myPID(&temperature, &outputVal, &setPoint, KP, KI, KD, DIRECT);
+
+int pressure = 0;
+float percentage = 0.0;
+float oxygenSetpoint = 32;
+boolean newData = false;
+
+unsigned long currentMillis = 0;
+unsigned long previousReadOxySenMillis = 0;
+//unsigned long previousReadDHTMillis = 0;
+const long ReadOxySenInterval = 1000;
+
+
+
+void recvWithStartEndMarkers() {
+    static boolean recvInProgress = false;
+    static byte ndx = 0;
+    char startMarker = 'O';
+    char endMarker = 'e';
+    char rc;
+
+    while (Serial2.available() > 0 && newData == false) {
+        rc = Serial2.read();
+
+        if (recvInProgress == true) {
+            if (rc != endMarker) {
+                receivedChars[ndx] = rc;
+                ndx++;
+                if (ndx >= numChars) {
+                    ndx = numChars - 1;
+                }
+            }
+            else {
+                receivedChars[ndx] = '\0'; // terminate the string
+                recvInProgress = false;
+                ndx = 0;
+                newData = true;
+            }
+        }
+
+        else if (rc == startMarker) {
+            recvInProgress = true;
+        }
+    }
+}
+
+
+//============
+
+void parseData() {      // split the data into its parts
+
+    char * strtokIndx; // this is used by strtok() as an index
+
+    //data from sensor send looks like: "O xxxx.x T yxx.x P xxxx % xxx.xx e xxxx\r\n"
+    //e.g. "O 0020.1 T +19.3 P 1013 % 020.16 e 0001\r\n"
+
+    strtokIndx = strtok(tempChars,"T");      // get the first part - the string
+    oxygen = atof(strtokIndx); // copy it to oxygen
+    
+    strtokIndx = strtok(NULL, "P"); // this continues where the previous call left off
+    temperature = atof(strtokIndx);     // convert this part to a float
+
+    strtokIndx = strtok(NULL, "%"); // this continues where the previous call left off
+    pressure = atoi(strtokIndx);     // convert this part to an integer
+
+    strtokIndx = strtok(NULL, "e"); // this continues where the previous call left off
+    percentage = atof(strtokIndx);     // convert this part to a float
+}
+
+//============
+
+void showParsedData() {
+    //Serial.print("Oxygen ");
+    //Serial.println(oxygen);
+    //Serial.print("Temperature ");
+    //Serial.println(temperature);
+    //Serial.print("Pressure ");
+    //Serial.println(pressure);
+   // Serial.print("Percent ");
+   
+   Serial.print(millis());
+   Serial.print("\tAAA");
+   Serial.print(temperature);
+   Serial.print("\t");
+    Serial.print(percentage);   
+    Serial.print("\t");
+    Serial.print(pressure/100); 
+
+    myPID.Compute();
+    Serial.print("\t");
+    Serial.print(outputVal/10); 
+
+
+         Serial.print("\t");
+    Serial.print(setPoint); 
+    Serial.println(""); 
+    analogWrite(HEATER_PIN,outputVal/heat_truncation_factor); 
+    oxygenLoop();  
+}
+
+
+void checkLimitSwitches(){
+  return; // DELETE
+  if(!digitalRead(X_ENDSTOP_PIN)){
+    while(1){
+    Serial.println(" X LIMIT SWITCH HIT. MUST RESET ROBOT."); 
+    Serial.println(digitalRead(X_ENDSTOP_PIN)); 
+    delay(1000);
+    }
+  }
+
+  if(!digitalRead(Y_ENDSTOP_PIN)){
+    while(1){
+    Serial.println("Y LIMIT SWITCH HIT. MUST RESET ROBOT."); 
+    delay(1000);
+    }
+  }
+}
+
+void moveX(long value, bool tolerate_limit_switch= false){
+    stepperX.moveTo(value);
+    while (stepperX.distanceToGo() != 0){
+      stepperX.run();
+    }
+    if(!tolerate_limit_switch){
+      checkLimitSwitches();
+    }
+  
+  }
+  
+void updateReadOxySen() {
+    if (currentMillis - previousReadOxySenMillis >= ReadOxySenInterval) {
+          // time is up, so make anew read
+        recvWithStartEndMarkers();
+        if (newData == true) {
+            strcpy(tempChars, receivedChars);
+                // this temporary copy is necessary to protect the original data
+                //   because strtok() used in parseData() replaces the commas with \0
+            parseData();
+            showParsedData();
+            
+            newData = false;
+        }          
+          // and save the time of change
+       previousReadOxySenMillis += ReadOxySenInterval;
+    }
+}
+
+
+String getValue(String data, char separator, int index)
+{
+    int found = 0;
+    int strIndex[] = { 0, -1 };
+    int maxIndex = data.length() - 1;
+
+    for (int i = 0; i <= maxIndex && found <= index; i++) {
+        if (data.charAt(i) == separator || i == maxIndex) {
+            found++;
+            strIndex[0] = strIndex[1] + 1;
+            strIndex[1] = (i == maxIndex) ? i+1 : i;
+        }
+    }
+    return found > index ? data.substring(strIndex[0], strIndex[1]) : "";
+}
+
+int readline(int readch, char *buffer, int len) {
+    static int pos = 0;
+    int rpos;
+
+    if (readch > 0) {
+        switch (readch) {
+            case '\r': // Ignore CR
+                break;
+            case '\n': // Return on new-line
+                rpos = pos;
+                pos = 0;  // Reset position index ready for next time
+                return rpos;
+            default:
+                if (pos < len-1) {
+                    buffer[pos++] = readch;
+                    buffer[pos] = 0;
+                }
+        }
+    }
+    return 0;
+}
+
+void runstep(){
+ // stepper1.runSpeed();
+}
+
+
+
+
+
+
+
+
+void help() {
+ // Serial.println(lower_positions[0]);
+  Serial.println("");
+  Serial.println(F("ID:INCUBATOR"));
+}
+
+
+void oxygenLoop(){
+
+  if(percentage > oxygenSetpoint and !(is_open) and times_gassed<30){
+    Serial.println("GASSING");
+    times_gassed = times_gassed+1;
+    //Serial.println(oxygen);
+    fanOff();
+    delay(5000);
+    gasPulse(65000);
+    fanOn();
+    delay(10000);
+    
+  }
+}
+
+void send_done(){
+  Serial.println("");
+  Serial.println("done");
+ }
+void loop() {
+  
+  checkLimitSwitches();
+  currentMillis = millis();  // capture the latest value of millis()
+  updateReadOxySen();
+ 
+if (readline(Serial.read(), buf, 80) > 0) {
+        
+        
+        Serial.print("You entered: >");
+        String command = getValue(buf, ':', 0);
+        long value = getValue(buf, ':', 1).toInt();
+
+        
+        Serial.println("Command:" + command);
+        Serial.println("Value:" );
+        Serial.print(value);
+
+        if (command=="X"){
+         stepperX.moveTo(value);
+          
+        }
+
+        if (command=="homeX"){
+         homeX();
+         send_done();
+          
+        }
+
+        if (command=="shuffle"){
+         shuffle(value);
+         
+          
+        }
+        
+       
+        if (command=="homeY"){
+         homeY();
+         send_done();
+          
+        }
+
+        
+        if (command=="Y"){
+         stepperY.moveTo(value);
+          
+        }
+
+        if (command=="door"){
+         stepperDoor.moveTo(value);
+          
+        }
+
+       
+        
+        if (command=="grab"){
+         grab(value);
+         send_done();
+          
+        }
+
+        if (command=="drop"){
+         drop(value);
+         send_done();
+          
+        }
+
+        if (command=="close"){
+         closeDoor();
+         send_done();
+          
+        }
+
+        if (command=="open"){
+         openDoor();
+         send_done();
+          
+        }
+
+        if (command=="gas"){
+         gasPulse(value);
+         send_done();
+          
+        }
+
+        
+        if (command=="fanoff"){
+         fanOff();
+         send_done();
+          
+        }
+
+        if (command=="fanon"){
+         fanOn();
+         send_done();
+          
+        }
+        if (command=="temperature"){
+         setPoint=value;
+         send_done();
+          
+        }
+        
+        
+       
+        Serial.println("<");
+}
+
+  stepperX.run();
+  stepperY.run();
+  stepperDoor.run();
+   //Serial.println( stepperDoor.speed());
+   //temperature = therm1.analog2temp(); // read temperature
+   
+   //myPID.Compute();
+   //Serial.print((String)temperature);
+   //Serial.print("\n");
+  /// analogWrite(10, outputVal);
+    
+}
+
+
+  
+void moveDoor(long value){
+    stepperDoor.moveTo(value);
+    while (stepperDoor.distanceToGo() != 0){
+      stepperDoor.run();
+    }
+  
+  }
+void moveY(long value, bool tolerate_limit_switch= false){
+    stepperY.moveTo(value);
+    while (stepperY.distanceToGo() != 0){
+      stepperY.run();
+    }
+    if(!tolerate_limit_switch){
+      checkLimitSwitches();
+    }
+  
+  }
+
+  void Zbounce(long value){
+    stepperDoor.moveTo(value);
+    while(1){
+    while (stepperDoor.distanceToGo() != 0){
+      stepperDoor.run();
+    }
+    stepperDoor.moveTo(-value);
+    value=-value;
+    }
+  
+  }
+
+  void gasPulse(long value){
+    fanOff();
+    delay(5*1000);
+    digitalWrite(GAS_PIN, HIGH);
+    delay(value);
+    digitalWrite(GAS_PIN, LOW);
+    fanOn();
+    
+  }
+
+  
+  void fanOff(){
+
+    digitalWrite(FAN_PIN, LOW);
+
+    
+  }
+
+  void fanOn(){
+
+    digitalWrite(FAN_PIN, HIGH);
+
+    
+  }
+
+
+void grab(int plate_position){
+  //homeShaker();
+  moveY(IN_POS);
+  
+  moveX(lower_positions[plate_position]);
+  //homeY();
+  moveY(OUT_POS);
+  moveX(lower_positions[plate_position]+UP_DOWN_DIFF);
+  moveY(IN_POS);
+  //startShaker();
+}
+
+void drop(int plate_position){
+  //homeShaker();
+  moveY(IN_POS);
+  moveX(lower_positions[plate_position]+UP_DOWN_DIFF);
+  //homeY();
+  moveY(OUT_POS);
+  moveX(lower_positions[plate_position]);
+  moveY(IN_POS);
+  //startShaker();
+}
+
+void closeDoor(){
+  
+  stepperDoor.setCurrentPosition(0);
+  stepperDoor.moveTo(GUARANTEED_TO_CLOSE);
+  while (stepperDoor.distanceToGo() != 0){
+      stepperDoor.run();
+    }
+  fanOn();
+  is_open=false;
+}
+
+void openDoor(){
+  is_open=true;
+  fanOff();
+  delay(2000);
+  stepperDoor.setCurrentPosition(0);
+  stepperDoor.moveTo(GUARANTEED_TO_OPEN);
+  while (stepperDoor.distanceToGo() != 0){
+      stepperDoor.run();
+    }
+}
+
+
+
+
+void shuffle(int empty_pos){
+  
+  int randNumber;
+  long ops_done = 1;
+  while(1){
+    ops_done++;
+    if(ops_done % 15 ==0 ){
+      homeY();
+      homeX();
+    }
+
+  randNumber = random(0, 8);
+  if (randNumber != empty_pos){
+    //Serial.println(lower_positions[randNumber]);
+    grab(randNumber);
+    drop(empty_pos);
+    empty_pos=randNumber;
+  }
+
+  }
+}
+
+
+void openclose(){
+  while(1){
+    closeDoor();
+  openDoor();
+  }
+};
+
+void homeY(){
+  Serial.println("Homing 'Y' started");
+  int initial_homing=0;
+  while (!(digitalRead(Y_ENDSTOP_PIN))) {  // Make the Stepper move CCW until the switch is activated   
+    stepperY.moveTo(initial_homing);  // Set the position to move to
+    initial_homing++;  // Decrease by 1 for next move if needed
+    stepperY.run();  // Start moving the stepper
+    delayMicroseconds(1000);
+   }
+  
+
+  while (digitalRead(Y_ENDSTOP_PIN)) {  // Make the Stepper move CCW until the switch is activated   
+    stepperY.moveTo(initial_homing);  // Set the position to move to
+    initial_homing--;  // Decrease by 1 for next move if needed
+    stepperY.run();  // Start moving the stepper
+    delayMicroseconds(1000);
+}
+
+  stepperY.setCurrentPosition(0);  // Set the current position as zero for now
+  Serial.println("Homing 'Y' complete");
+  moveY(IN_POS, true);
+}
+
+void homeX(){
+  Serial.println("Homing 'X'");
+  int initial_homing=0;
+  while (!(digitalRead(X_ENDSTOP_PIN))) {  // Make the Stepper move CCW until the switch is activated   
+    stepperX.moveTo(initial_homing);  // Set the position to move to
+    initial_homing++;  // Decrease by 1 for next move if needed
+    stepperX.run();  // Start moving the stepper
+    delay(1);
+   }
+  
+  Serial.println("Homing 'X' - part 2");
+  while (digitalRead(X_ENDSTOP_PIN)) {  // Make the Stepper move CCW until the switch is activated   
+    stepperX.moveTo(initial_homing);  // Set the position to move to
+    initial_homing--;  // Decrease by 1 for next move if needed
+    stepperX.run();  // Start moving the stepper
+    delay(1);
+}
+
+  stepperX.setCurrentPosition(0);  // Set the current position as zero for now
+  Serial.println("Homing 'X' complete");
+  moveX(X_STARTING_HEIGHT, true);
+}
+
+void setup() {
+  pinMode(FAN_PIN, OUTPUT);
+  pinMode(HEATER_PIN, OUTPUT);
+  pinMode(GAS_PIN, OUTPUT);
+
+  digitalWrite(FAN_PIN, HIGH);
+  setPoint=23;
+  myPID.SetMode(AUTOMATIC);
+  myPID.SetSampleTime(1000);
+ 
+ 
+  Serial.begin(BAUD); // open coms
+  Serial2.begin(9600); //For Luminox sensor on D16, D17
+   
+  help(); // say hello
+
+  stepperX.setEnablePin(X_ENABLE_PIN);
+  stepperX.setPinsInverted(false, false, true); //invert logic of enable pin
+  stepperX.enableOutputs();
+  stepperX.setMaxSpeed(2200.0);
+  stepperX.setAcceleration(300.0);
+
+  stepperY.setEnablePin(Y_ENABLE_PIN);
+  stepperY.setPinsInverted(false, false, true); //invert logic of enable pin
+  stepperY.enableOutputs();
+  stepperY.setMaxSpeed(1800.0);
+  stepperY.setAcceleration(400.0);
+
+
+  stepperDoor.setEnablePin(Z_ENABLE_PIN);
+  stepperDoor.setPinsInverted(false, false, true); //invert logic of enable pin
+  stepperDoor.enableOutputs();
+  stepperDoor.setMaxSpeed(20000.0);
+  stepperDoor.setAcceleration(1500.0);
+  //closeDoor();
+  homeY();
+  homeX(); 
+ // Zbounce(500);
+  //openclose();
+ // homeShaker();
+  //stepperDoor.setSpeed(SHAKER_SPEED);
+  //shuffle(0);
+  //stepperX.moveTo(-500);
+}
