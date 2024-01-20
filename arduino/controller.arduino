@@ -24,8 +24,9 @@
 #define Z_ENDSTOP_PIN          18
 
 #define IN_POS       100
-#define OUT_POS       2480
+#define OUT_POS       2520
 #define UP_DOWN_DIFF       800
+# define PAT_DIST 230
 
 #define SHAKER_OPTIMAL 0
 #define SHAKER_SPEED 8000
@@ -145,7 +146,7 @@ void showParsedData() {
    // Serial.print("Percent ");
    
    Serial.print(millis());
-   Serial.print("\tAAA");
+   Serial.print("\t");
    Serial.print(temperature);
    Serial.print("\t");
     Serial.print(percentage);   
@@ -344,7 +345,20 @@ if (readline(Serial.read(), buf, 80) > 0) {
        
         
         if (command=="grab"){
+         
          grab(value);
+         send_done();
+          
+        }
+
+        if (command=="testgrab"){
+         testgrab(value);
+         send_done();
+          
+        }
+
+        if (command=="pat"){
+         pat(value);
          send_done();
           
         }
@@ -466,26 +480,65 @@ void moveY(long value, bool tolerate_limit_switch= false){
     
   }
 
+  
+
 
 void grab(int plate_position){
+  
   //homeShaker();
   moveY(IN_POS);
   
-  moveX(lower_positions[plate_position]);
+  moveX(lower_positions[plate_position]-2);
   //homeY();
   moveY(OUT_POS);
-  moveX(lower_positions[plate_position]+UP_DOWN_DIFF);
+ 
+  moveX(lower_positions[plate_position]-2+UP_DOWN_DIFF);
+  
   moveY(IN_POS);
   //startShaker();
 }
 
+
+void testgrab(int plate_position){
+  //homeShaker();
+  moveY(IN_POS);
+  
+  moveX(lower_positions[plate_position]-2);
+  //homeY();
+  moveY(OUT_POS);
+ 
+  moveX(lower_positions[plate_position]-2+UP_DOWN_DIFF);
+  moveX(lower_positions[plate_position]-2);
+  
+  moveY(IN_POS);
+  //startShaker();
+}
+
+
+
 void drop(int plate_position){
   //homeShaker();
   moveY(IN_POS);
-  moveX(lower_positions[plate_position]+UP_DOWN_DIFF);
+  moveX(lower_positions[plate_position]+UP_DOWN_DIFF-2);
   //homeY();
   moveY(OUT_POS);
-  moveX(lower_positions[plate_position]);
+  moveX(lower_positions[plate_position]-2);
+  moveY(IN_POS);
+  //startShaker();
+  pat(plate_position);
+}
+
+void pat(int plate_position){
+  //homeShaker();
+  moveY(IN_POS);
+  
+  moveX(lower_positions[plate_position+1]-2);
+  //homeY();
+  moveY(OUT_POS);
+ 
+  moveX(lower_positions[plate_position+1]-2- PAT_DIST);
+  moveX(lower_positions[plate_position+1]-2);
+  
   moveY(IN_POS);
   //startShaker();
 }
@@ -526,7 +579,7 @@ void shuffle(int empty_pos){
       homeX();
     }
 
-  randNumber = random(0, 8);
+  randNumber = random(0, 7);
   if (randNumber != empty_pos){
     //Serial.println(lower_positions[randNumber]);
     grab(randNumber);
@@ -550,10 +603,11 @@ void homeY(){
   int initial_homing=0;
   while (!(digitalRead(Y_ENDSTOP_PIN))) {  // Make the Stepper move CCW until the switch is activated   
     stepperY.moveTo(initial_homing);  // Set the position to move to
-    initial_homing++;  // Decrease by 1 for next move if needed
+    initial_homing++;  // Decrease by 1 for next move if neededX
     stepperY.run();  // Start moving the stepper
     delayMicroseconds(1000);
    }
+   Serial.println("Got initial value: " + String(initial_homing));
   
 
   while (digitalRead(Y_ENDSTOP_PIN)) {  // Make the Stepper move CCW until the switch is activated   
@@ -562,6 +616,7 @@ void homeY(){
     stepperY.run();  // Start moving the stepper
     delayMicroseconds(1000);
 }
+Serial.println("Got final value: " + String(initial_homing));
 
   stepperY.setCurrentPosition(0);  // Set the current position as zero for now
   Serial.println("Homing 'Y' complete");
@@ -577,6 +632,7 @@ void homeX(){
     stepperX.run();  // Start moving the stepper
     delay(1);
    }
+   Serial.println("Got initial value: " + String(initial_homing));
   
   Serial.println("Homing 'X' - part 2");
   while (digitalRead(X_ENDSTOP_PIN)) {  // Make the Stepper move CCW until the switch is activated   
@@ -585,6 +641,8 @@ void homeX(){
     stepperX.run();  // Start moving the stepper
     delay(1);
 }
+Serial.println("Got initial value: " + String(initial_homing));
+
 
   stepperX.setCurrentPosition(0);  // Set the current position as zero for now
   Serial.println("Homing 'X' complete");
